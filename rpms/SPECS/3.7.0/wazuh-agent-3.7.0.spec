@@ -52,7 +52,7 @@ make clean
 
 %if 0%{?el} >= 6 || 0%{?rhel} >= 6
     make deps
-    make -j%{_threads} TARGET=agent USE_SELINUX=yes PREFIX=%{_localstatedir}/ossec 
+    make -j%{_threads} TARGET=agent USE_SELINUX=yes PREFIX=%{_localstatedir}/ossec
 %else
     make deps RESOURCES_URL=http://packages.wazuh.com/deps/3.7
     make -j%{_threads} TARGET=agent USE_AUDIT=no USE_SELINUX=yes USE_EXEC_ENVIRON=no PREFIX=%{_localstatedir}/ossec
@@ -99,36 +99,41 @@ install -m 0640 wodles/oscap/content/*fedora* ${RPM_BUILD_ROOT}%{_localstatedir}
 cp CHANGELOG.md CHANGELOG
 
 # Add configuration scripts
-mkdir -p ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/
-cp gen_ossec.sh ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/
-cp add_localfiles.sh ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/
+mkdir -p ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/
+cp gen_ossec.sh ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/
+cp add_localfiles.sh ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/
 
 # Templates for initscript
-mkdir -p ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/src/init
-mkdir -p ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/src/systemd
-mkdir -p ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/etc/templates/config/generic
-mkdir -p ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/etc/templates/config/centos
-mkdir -p ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/etc/templates/config/fedora
-mkdir -p ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/etc/templates/config/rhel
+mkdir -p ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/src/init
+mkdir -p ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/src/systemd
+mkdir -p ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/etc/templates/config/generic
+mkdir -p ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/etc/templates/config/centos
+mkdir -p ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/etc/templates/config/fedora
+mkdir -p ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/etc/templates/config/rhel
+
+# Add SUSE initscript
+cp -rp src/init/ossec-hids-suse.init ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/src/init/
 
 # Copy scap templates
-cp -rp  etc/templates/config/generic/* ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/etc/templates/config/generic
-cp -rp  etc/templates/config/centos/* ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/etc/templates/config/centos
-cp -rp  etc/templates/config/fedora/* ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/etc/templates/config/fedora
-cp -rp  etc/templates/config/rhel/* ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/etc/templates/config/rhel
+cp -rp  etc/templates/config/generic/* ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/etc/templates/config/generic
+cp -rp  etc/templates/config/centos/* ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/etc/templates/config/centos
+cp -rp  etc/templates/config/fedora/* ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/etc/templates/config/fedora
+cp -rp  etc/templates/config/rhel/* ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/etc/templates/config/rhel
 
-install -m 0640 src/init/*.sh ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/src/init
+install -m 0640 src/init/*.sh ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/src/init
 
 # Add installation scripts
-cp src/VERSION ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/src/
-cp src/REVISION ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/src/
-cp src/LOCATION ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/src/
-cp -r src/systemd/* ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/tmp/src/systemd
+cp src/VERSION ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/src/
+cp src/REVISION ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/src/
+cp src/LOCATION ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/src/
+cp -r src/systemd/* ${RPM_BUILD_ROOT}%{_localstatedir}/ossec/packages_files/agent_installation_scripts/src/systemd
 
 exit 0
 %pre
 
-if ! id -g ossec > /dev/null 2>&1; then
+if command -v getent > /dev/null 2>&1 && ! getent group ossec > /dev/null 2>&1; then
+  groupadd -r ossec
+elif ! id -g ossec > /dev/null 2>&1; then
   groupadd -r ossec
 fi
 if ! id -u ossec > /dev/null 2>&1; then
@@ -157,13 +162,17 @@ if [ $1 = 2 ]; then
 fi
 
 %post
-# If the package is being installed 
+. %{_localstatedir}/ossec/packages_files/agent_installation_scripts/src/init/dist-detect.sh
+# If the package is being installed
 if [ $1 = 1 ]; then
+  sles=""
   if [ -f /etc/os-release ]; then
     sles=$(grep "\"sles" /etc/os-release)
-    if [ ! -z "$sles" ]; then
-      install -m 755 %{_localstatedir}/ossec/tmp/src/init/ossec-hids-suse.init /etc/rc.d/wazuh-agent
-    fi
+  elif [ -f /etc/SuSE-release ]; then
+    sles=$(grep "SUSE Linux Enterprise Server" /etc/SuSE-release)
+  fi
+  if [ ! -z "$sles" ]; then
+    install -m 755 %{_localstatedir}/ossec/packages_files/agent_installation_scripts/src/init/ossec-hids-suse.init /etc/init.d/wazuh-agent
   fi
 
   touch %{_localstatedir}/ossec/logs/active-responses.log
@@ -171,24 +180,32 @@ if [ $1 = 1 ]; then
   chmod 0660 %{_localstatedir}/ossec/logs/active-responses.log
 
   # Generating osse.conf file
-  . %{_localstatedir}/ossec/tmp/src/init/dist-detect.sh
-  %{_localstatedir}/ossec/tmp/gen_ossec.sh conf agent ${DIST_NAME} ${DIST_VER}.${DIST_SUBVER} %{_localstatedir}/ossec > %{_localstatedir}/ossec/etc/ossec.conf
+  %{_localstatedir}/ossec/packages_files/agent_installation_scripts/gen_ossec.sh conf agent ${DIST_NAME} ${DIST_VER}.${DIST_SUBVER} %{_localstatedir}/ossec > %{_localstatedir}/ossec/etc/ossec.conf
   chown root:ossec %{_localstatedir}/ossec/etc/ossec.conf
   chmod 0640 %{_localstatedir}/ossec/etc/ossec.conf
 
   # Add default local_files to ossec.conf
-  %{_localstatedir}/ossec/tmp/add_localfiles.sh %{_localstatedir}/ossec >> %{_localstatedir}/ossec/etc/ossec.conf
+  %{_localstatedir}/ossec/packages_files/agent_installation_scripts/add_localfiles.sh %{_localstatedir}/ossec >> %{_localstatedir}/ossec/etc/ossec.conf
   if [ -f %{_localstatedir}/ossec/etc/ossec.conf.rpmorig ]; then
-      %{_localstatedir}/ossec/tmp/src/init/replace_manager_ip.sh %{_localstatedir}/ossec/etc/ossec.conf.rpmorig %{_localstatedir}/ossec/etc/ossec.conf
+      %{_localstatedir}/ossec/packages_files/agent_installation_scripts/src/init/replace_manager_ip.sh %{_localstatedir}/ossec/etc/ossec.conf.rpmorig %{_localstatedir}/ossec/etc/ossec.conf
   fi
 
   /sbin/chkconfig --add wazuh-agent
   /sbin/chkconfig wazuh-agent on
 
+  # If systemd is installed, add the wazuh-agent.service file to systemd files directory
   if [ -d /run/systemd/system ]; then
-    install -m 644 %{_localstatedir}/ossec/tmp/src/systemd/wazuh-agent.service /etc/systemd/system/
+    install -m 644 %{_localstatedir}/ossec/packages_files/agent_installation_scripts/src/systemd/wazuh-agent.service /etc/systemd/system/
+
+    # Fix for Fedora 28
+    # Check if SELinux is installed. If it is installed, restore the context of the .service file
+    if [ "${DIST_NAME}" == "fedora" -a "${DIST_VER}" == "28" ]; then
+      if command -v restorecon > /dev/null 2>&1 ; then
+        restorecon -v /etc/systemd/system/wazuh-agent.service > /dev/null 2>&1
+      fi
+    fi
     systemctl daemon-reload
-    systemctl stop wazuh-agent 
+    systemctl stop wazuh-agent
     systemctl enable wazuh-agent > /dev/null 2>&1
   fi
 
@@ -198,9 +215,8 @@ if [ ! -d /run/systemd/system ]; then
   update-rc.d wazuh-agent defaults > /dev/null 2>&1
 fi
 
-rm -rf %{_localstatedir}/ossec/tmp/etc
-rm -rf %{_localstatedir}/ossec/tmp/src
-rm -f %{_localstatedir}/ossec/tmp/add_localfiles.sh
+# Delete the installation files used to configure the agent
+rm -rf %{_localstatedir}/ossec/packages_files
 
 if [ $1 = 2 ]; then
   if [ -f %{_localstatedir}/ossec/etc/ossec.bck ]; then
@@ -260,7 +276,7 @@ if [ $1 = 0 ]; then
   if [ -r "/etc/centos-release" ]; then
     DIST_NAME="centos"
     DIST_VER=`sed -rn 's/.* ([0-9]{1,2})\.[0-9]{1,2}.*/\1/p' /etc/centos-release`
-  
+
   elif [ -r "/etc/redhat-release" ]; then
     DIST_NAME="rhel"
     DIST_VER=`sed -rn 's/.* ([0-9]{1,2})\.[0-9]{1,2}.*/\1/p' /etc/redhat-release`
@@ -276,18 +292,33 @@ if [ $1 = 0 ]; then
   if [ "${DIST_NAME}" == "centos" -a "${DIST_VER}" == "5" ] || [ "${DIST_NAME}" == "rhel" -a "${DIST_VER}" == "5" ] || [ "${DIST_NAME}" == "suse" -a "${DIST_VER}" == "11" ] ; then
     add_selinux="no"
   fi
-  
+
   # If it is a valid system, remove the policy if it is installed
   if [ ${add_selinux} == "yes" ]; then
     if command -v getenforce > /dev/null 2>&1 && command -v semodule > /dev/null 2>&1; then
       if [ $(getenforce) !=  "Disabled" ]; then
         if (semodule -l | grep wazuh > /dev/null); then
-          semodule -r wazuh
+          semodule -r wazuh > /dev/null
         fi
       fi
     fi
   fi
+
+  # Remove the service file for SUSE hosts
+  if [ -f /etc/os-release ]; then
+    sles=$(grep "\"sles" /etc/os-release)
+  elif [ -f /etc/SuSE-release ]; then
+    sles=$(grep "SUSE Linux Enterprise Server" /etc/SuSE-release)
+  fi
+  if [ ! -z "$sles" ]; then
+    rm -f /etc/init.d/wazuh-agent
+  fi
+
+  # Remove the wazuh-agent.service file
+  rm -f /etc/systemd/system/wazuh-agent.service
 fi
+
+
 
 %triggerin -- glibc
 [ -r %{_sysconfdir}/localtime ] && cp -fpL %{_sysconfdir}/localtime %{_localstatedir}/ossec/etc
@@ -300,12 +331,24 @@ fi
 if [ $1 == 0 ];then
   # Remove the ossec user if it exists
   if id -u ossec > /dev/null 2>&1; then
-    userdel ossec
+    userdel ossec >/dev/null 2>&1
   fi
   # Remove the ossec group if it exists
-  if id -g ossec > /dev/null 2>&1; then
-    groupdel ossec
+  if command -v getent > /dev/null 2>&1 && getent group ossec > /dev/null 2>&1; then
+    groupdel ossec >/dev/null 2>&1
+  elif id -g ossec > /dev/null 2>&1; then
+    groupdel ossec >/dev/null 2>&1
   fi
+
+
+  # Remove lingering folders and files
+  rm -rf %{_localstatedir}/ossec/etc/shared/
+  rm -rf %{_localstatedir}/ossec/queue/
+  rm -rf %{_localstatedir}/ossec/var/
+  rm -rf %{_localstatedir}/ossec/bin/
+  rm -rf %{_localstatedir}/ossec/logs/
+  rm -rf %{_localstatedir}/ossec/backup/
+
 fi
 
 # If the package is been downgraded
@@ -381,6 +424,15 @@ rm -fr %{buildroot}
 %attr(660,root,ossec) %ghost %{_localstatedir}/ossec/logs/ossec.log
 %attr(660,root,ossec) %ghost %{_localstatedir}/ossec/logs/ossec.json
 %dir %attr(750,ossec,ossec) %{_localstatedir}/ossec/logs/ossec
+%dir %attr(750, root, root) %config(missingok) %{_localstatedir}/ossec/packages_files
+%dir %attr(750, root, root) %config(missingok) %{_localstatedir}/ossec/packages_files/agent_installation_scripts
+%attr(750,root,root) %config(missingok) %{_localstatedir}/ossec/packages_files/agent_installation_scripts/add_localfiles.sh
+%attr(750,root,root) %config(missingok) %{_localstatedir}/ossec/packages_files/agent_installation_scripts/gen_ossec.sh
+%attr(750,root,root) %config(missingok) %{_localstatedir}/ossec/packages_files/agent_installation_scripts/etc/templates/config/generic/*
+%attr(750,root,root) %config(missingok) %{_localstatedir}/ossec/packages_files/agent_installation_scripts/etc/templates/config/centos/*
+%attr(750,root,root) %config(missingok) %{_localstatedir}/ossec/packages_files/agent_installation_scripts/etc/templates/config/fedora/*
+%attr(750,root,root) %config(missingok) %{_localstatedir}/ossec/packages_files/agent_installation_scripts/etc/templates/config/rhel/*
+%attr(750,root,root) %config(missingok) %{_localstatedir}/ossec/packages_files/agent_installation_scripts/src/*
 %dir %attr(750,root,ossec) %{_localstatedir}/ossec/queue
 %dir %attr(750,ossec,ossec) %{_localstatedir}/ossec/queue/agents
 %dir %attr(770,ossec,ossec) %{_localstatedir}/ossec/queue/ossec
@@ -388,13 +440,6 @@ rm -fr %{buildroot}
 %dir %attr(770,ossec,ossec) %{_localstatedir}/ossec/queue/alerts
 %dir %attr(750,ossec,ossec) %{_localstatedir}/ossec/queue/rids
 %dir %attr(1750,root,ossec) %{_localstatedir}/ossec/tmp
-%attr(750,root,root) %config(missingok) %{_localstatedir}/ossec/tmp/add_localfiles.sh
-%attr(750,root,root) %config(missingok) %{_localstatedir}/ossec/tmp/gen_ossec.sh
-%attr(750,root,root) %config(missingok) %{_localstatedir}/ossec/tmp/etc/templates/config/generic/*
-%attr(750,root,root) %config(missingok) %{_localstatedir}/ossec/tmp/etc/templates/config/centos/*
-%attr(750,root,root) %config(missingok) %{_localstatedir}/ossec/tmp/etc/templates/config/fedora/*
-%attr(750,root,root) %config(missingok) %{_localstatedir}/ossec/tmp/etc/templates/config/rhel/*
-%attr(750,root,root) %config(missingok) %{_localstatedir}/ossec/tmp/src/*
 %dir %attr(750,root,ossec) %{_localstatedir}/ossec/var
 %dir %attr(770,root,ossec) %{_localstatedir}/ossec/var/incoming
 %dir %attr(770,root,ossec) %{_localstatedir}/ossec/var/run

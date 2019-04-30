@@ -28,9 +28,18 @@ from your own application or with a simple web browser or tools like cURL
 
 # Install nodejs dependencies
 npm install --production
-# Create the ossec user 
-groupadd ossec
-useradd ossec -g ossec
+
+#Create ossec group
+if ! id -g ossec > /dev/null 2>&1; then
+  groupadd -r ossec
+fi
+
+#Create ossec user. Assign it to ossec group.
+if ! id -u ossec > /dev/null 2>&1; then
+  useradd -g ossec -G ossec       \
+        -d %{_localstatedir}/ossec \
+        -r -s /sbin/nologin ossec
+fi
 
 %install
 # Clean BUILDROOT
@@ -40,7 +49,7 @@ rm -fr %{buildroot}
 mkdir -p %{_localstatedir}/ossec/{framework,logs}
 echo 'DIRECTORY="%{_localstatedir}/ossec"' > /etc/ossec-init.conf
 # Install the wazuh-api
-./install_api.sh
+./install_api.sh --no-service
 # Remove the framework directory
 rmdir %{_localstatedir}/ossec/framework
 
@@ -53,6 +62,19 @@ cp CHANGELOG.md CHANGELOG
 exit 0
 %pre
 
+# Upgrading
+if [ $1 = 2 ]; then
+  # Stop services
+  if [ -n "$(ps -e | egrep ^\ *1\ .*systemd$)" ]; then
+    systemctl stop wazuh-api.service > /dev/null
+  elif [ -x /etc/rc.d/init.d/wazuh-api ] ; then
+    /etc/rc.d/init.d/wazuh-api stop > /dev/null
+  elif [ -n "$(ps -e | egrep ^\ *1\ .*init$)" ]; then
+    /etc/init.d/wazuh-api stop > /dev/null
+  fi
+fi
+
+# Installing
 if [ $1 = 1 ]; then
 
   API_PATH="${RPM_BUILD_ROOT}%{_localstatedir}/ossec/api"
@@ -71,9 +93,8 @@ fi
 
 %post
 
-if [ $1 = 1 ]; then
-  %{_localstatedir}/ossec/api/scripts/install_daemon.sh
-fi
+# Install daemon. It will load new daemon (SysV and Systemctl) and start the service.
+%{_localstatedir}/ossec/api/scripts/install_daemon.sh > /dev/null
 
 API_PATH="${RPM_BUILD_ROOT}%{_localstatedir}/ossec/api"
 API_PATH_BACKUP="${RPM_BUILD_ROOT}%{_localstatedir}/ossec/~api"
@@ -85,35 +106,42 @@ fi
 
 # Verify if Python is installed and its version
 if python -V >/dev/null 2>&1; then
-   python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:3])))' | cut -c1-3)
-   if [ ! $python_version == '2.7' ]; then
-      echo "Warning: Minimal supported version is 2.7."
-   fi
+ python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:3])))' | cut -c1-3)
+ if [ ! $python_version == '2.7' ]; then
+    echo "Warning: Minimal supported version is 2.7."
+ fi
 else
-   echo "Warning: You need Python 2.7 or greater."
-fi
-
-# Restart the Wazuh API service
-if [ -n "$(ps -e | egrep ^\ *1\ .*systemd$)" ]; then
-  systemctl daemon-reload
-  systemctl restart wazuh-api.service
-elif [ -n "$(ps -e | egrep ^\ *1\ .*init$)" ]; then
-  service wazuh-api restart
+ echo "Warning: You need Python 2.7 or greater."
 fi
 
 %preun
 
 if [ $1 = 0 ]; then
   if [ -n "$(ps -e | egrep ^\ *1\ .*systemd$)" ]; then
-    systemctl stop wazuh-api.service
-    systemctl disable wazuh-api.service
+    systemctl stop wazuh-api.service > /dev/null
+    systemctl disable wazuh-api.service > /dev/null
     rm -f /etc/systemd/system/wazuh-api.service
   fi
 
   if [ -n "$(ps -e | egrep ^\ *1\ .*init$)" ]; then
-    service wazuh-api stop
+    /etc/init.d/wazuh-api stop > /dev/null
     chkconfig wazuh-api off
+    chkconfig --del wazuh-api
+    rm -f /etc/rc.d/init.d/wazuh-api || true
   fi
+fi
+
+%posttrans
+
+# Restart the Wazuh API service in case the installation was trigger as dependency
+if [ -n "$(ps -e | egrep ^\ *1\ .*systemd$)" ]; then
+  systemctl start wazuh-api.service > /dev/null
+elif [ -x /etc/rc.d/init.d/wazuh-api ] ; then
+  /etc/rc.d/init.d/wazuh-api start > /dev/null
+elif [ -n "$(ps -e | egrep ^\ *1\ .*init$)" ]; then
+  /etc/init.d/wazuh-api start > /dev/null
+else
+  echo "Error: Wazuh API could not restart"
 fi
 
 %clean
@@ -153,7 +181,7 @@ rm -fr %{buildroot}
 %attr(660, ossec, ossec) %ghost %{_localstatedir}/ossec/logs/api.log
 
 %changelog
-* Fri Sep 7 2018 support <info@wazuh.com> - 3.7.0
+* Sun Nov 5 2018 support <info@wazuh.com> - 3.7.0
 - More info: https://documentation.wazuh.com/current/release-notes/
 * Mon Sep 3 2018 support <info@wazuh.com> - 3.6.1
 - More info: https://documentation.wazuh.com/current/release-notes/
